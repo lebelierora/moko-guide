@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>モコのお店案内</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body {
+    font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: #faf3e6;
+    color: #4a3f35;
+    display: flex; flex-direction: column; align-items: center;
+    height: 100dvh; overflow: hidden;
+    touch-action: manipulation;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  }
+  .stage {
+    flex: 1 1 auto; width: 100%; max-width: 430px;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0; padding-top: 8px;
+  }
+  .char-wrap {
+    position: relative; height: 100%; max-height: 100%;
+    aspect-ratio: 600 / 740;
+    animation: breathe 3.6s ease-in-out infinite;
+    transform-origin: 50% 100%;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.014) translateY(-3px); }
+  }
+  .char-wrap img {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; border-radius: 18px;
+    opacity: 0; transition: opacity 60ms linear;
+    box-shadow: 0 8px 28px rgba(120, 95, 60, .18);
+  }
+  .char-wrap img.on { opacity: 1; }
+  .bubble {
+    flex: 0 0 auto; width: 100%; max-width: 430px;
+    background: #fff; border: 2px solid #e8dcc8; border-radius: 16px;
+    padding: 10px 14px; margin: 8px 0 10px;
+    min-height: 70px;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .bubble p { font-size: 15.5px; line-height: 1.6; }
+  .bubble p.idle { color: #a08b74; font-size: 14.5px; }
+  .topics {
+    flex: 0 0 auto; width: 100%; max-width: 430px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    padding-bottom: 6px;
+  }
+  .topics button {
+    padding: 13px 6px; font-size: 15.5px; font-weight: 700;
+    font-family: inherit; color: #fff; background: #8a9a5b;
+    border: none; border-radius: 14px; cursor: pointer;
+  }
+  .topics button:active { transform: scale(.97); }
+  .topics button.playing { background: #b08968; }
+  .note { flex: 0 0 auto; text-align: center; font-size: 12px; color: #b3a28c; padding-bottom: 10px; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="char-wrap" id="wrap">
+      <img id="img-base" class="on" src="base.jpg" alt="">
+      <img id="img-blink" src="blink.jpg" alt="">
+      <img id="img-talk" src="talk.jpg" alt="">
+      <img id="img-smile" src="smile.jpg" alt="">
+    </div>
+  </div>
+  <div class="bubble"><p id="line" class="idle">聞きたい項目を押すと、モコが説明します</p></div>
+  <div class="topics" id="topics"></div>
+  <div class="note">開いている間だけの試作です。音が出ます。</div>
+<script>
+(function(){
+  var imgs = {
+    base: document.getElementById('img-base'),
+    blink: document.getElementById('img-blink'),
+    talk: document.getElementById('img-talk'),
+    smile: document.getElementById('img-smile')
+  };
+  var lineEl = document.getElementById('line');
+  var topicsEl = document.getElementById('topics');
+  var current = 'base';
+  var speaking = false;
+  var exprNow = 'base';
+  var playingIdx = -1;
+
+  function show(name){
+    if (name === current) return;
+    imgs[current].classList.remove('on');
+    imgs[name].classList.add('on');
+    current = name;
+  }
+
+  // 瞬き：喋っていないときだけ、たまに瞬き画像へ
+  function blinkLoop(){
+    var wait = 2200 + Math.random() * 2800;
+    setTimeout(function(){
+      if (!speaking) {
+        show('blink');
+        setTimeout(function(){ if (!speaking) show(exprNow); }, 160);
+      }
+      blinkLoop();
+    }, wait);
+  }
+  blinkLoop();
+
+  var LINES = [
+    { label: 'ごあいさつ',       expr: 'smile', src: 'line1.mp3', text: 'いらっしゃいませ！ るべりえへようこそ。アシスタントのモコです。初めての方にも分かりやすいように、お店のことをご説明しますね。' },
+    { label: 'お店のこと',       expr: 'base',  src: 'line2.mp3', text: 'るべりえは、群馬県邑楽町にある創作ピザとスイーツのお店です。ピザの生地には、群馬県産の小麦を使っています。' },
+    { label: '注文の仕方',       expr: 'base',  src: 'line3.mp3', text: 'ご注文は、店内でのご注文のほか、お電話 0276-70-2321 でのご予約もできます。スマホからのモバイルオーダーもご利用いただけます。' },
+    { label: 'テイクアウト',     expr: 'base',  src: 'line4.mp3', text: 'テイクアウトのピザは、カットせずにお渡しするのが基本です。箱代は100円、4カットはご希望があれば対応します。紙皿とホイルは無料です。' },
+    { label: 'イートイン限定',   expr: 'base',  src: 'line5.mp3', text: 'メニューの中には、イートイン限定のものもあります。店内でのお食事も、是非ゆっくりお楽しみください。' },
+    { label: '冷凍ピザと自販機', expr: 'smile', src: 'line6.mp3', text: 'お店の外には、冷凍ピザの自動販売機もあります。コハクペイは自販機では使えませんが、営業時間内に店頭でお声がけいただければご利用いただけます。' },
+    { label: '営業時間',         expr: 'base',  src: 'line7.mp3', text: '営業時間は11:00から20:00まで、日曜日は18:00までです。木曜日が定休日です。' },
+    { label: '通販',             expr: 'smile', src: 'line8.mp3', text: '冷凍ピザは、STORESのネットショップから、全国への配送もできます。遠方の方への贈り物にもどうぞ。' }
+  ];
+  var audios = [];
+  var buttons = [];
+  for (var i = 0; i < LINES.length; i++) {
+    var a = new Audio(LINES[i].src);
+    a.preload = 'auto';
+    audios.push(a);
+    (function(idx){
+      var b = document.createElement('button');
+      b.textContent = LINES[idx].label;
+      b.addEventListener('click', function(){ tapTopic(idx); });
+      topicsEl.appendChild(b);
+      buttons.push(b);
+    })(i);
+  }
+
+  // 音量連動の口パク：声の大きさで口の開閉を決める
+  var actx = null, analyser = null, mouthRaf = null, mouthOpen = false;
+  function initAudioGraph(){
+    if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      analyser = actx.createAnalyser();
+      analyser.fftSize = 512;
+      for (var i = 0; i < audios.length; i++) {
+        actx.createMediaElementSource(audios[i]).connect(analyser);
+      }
+      analyser.connect(actx.destination);
+    } catch (e) {
+      actx = null; analyser = null;
+    }
+  }
+  var smoothLevel = 0, lastSwitch = 0;
+  function mouthLoop(){
+    if (!speaking) return;
+    if (analyser) {
+      var buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      var sum = 0;
+      for (var i = 0; i < buf.length; i++) { var d = (buf[i] - 128) / 128; sum += d * d; }
+      var rms = Math.sqrt(sum / buf.length);
+      smoothLevel = smoothLevel * 0.55 + rms * 0.45;
+      var now = performance.now();
+      if (now - lastSwitch >= 110) {
+        if (!mouthOpen && smoothLevel > 0.045) { mouthOpen = true; lastSwitch = now; show('talk'); }
+        else if (mouthOpen && smoothLevel < 0.02) { mouthOpen = false; lastSwitch = now; show(exprNow); }
+      }
+    }
+    mouthRaf = requestAnimationFrame(mouthLoop);
+  }
+  function startMouth(){
+    if (analyser) { mouthLoop(); }
+    else {
+      mouthRaf = setInterval(function(){ show(current === 'talk' ? exprNow : 'talk'); }, 170);
+    }
+  }
+  function stopMouth(){
+    if (mouthRaf) { cancelAnimationFrame(mouthRaf); clearInterval(mouthRaf); mouthRaf = null; }
+    mouthOpen = false;
+  }
+
+  function setPlaying(idx){
+    playingIdx = idx;
+    for (var i = 0; i < buttons.length; i++) {
+      if (i === idx) buttons[i].classList.add('playing'); else buttons[i].classList.remove('playing');
+    }
+  }
+
+  function stopAll(){
+    speaking = false;
+    for (var i = 0; i < audios.length; i++) { try { audios[i].pause(); } catch (e) {} }
+    stopMouth();
+    exprNow = 'base';
+    show('base');
+    setPlaying(-1);
+  }
+
+  function tapTopic(idx){
+    initAudioGraph();
+    if (speaking && playingIdx === idx) { stopAll(); return; }
+    for (var i = 0; i < audios.length; i++) { try { audios[i].pause(); } catch (e) {} }
+    stopMouth();
+    speaking = true;
+    setPlaying(idx);
+    var L = LINES[idx];
+    exprNow = L.expr;
+    show(exprNow);
+    lineEl.classList.remove('idle');
+    lineEl.textContent = L.text;
+    var a = audios[idx];
+    a.currentTime = 0;
+    a.onended = function(){
+      stopMouth();
+      speaking = false;
+      exprNow = 'base';
+      show('base');
+      setPlaying(-1);
+    };
+    a.onerror = function(){
+      stopMouth();
+      speaking = false;
+      show(exprNow);
+      setPlaying(-1);
+    };
+    var p = a.play();
+    if (p && p.catch) p.catch(function(){ stopMouth(); speaking = false; setPlaying(-1); });
+    startMouth();
+  }
+
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden) stopAll();
+  });
+})();
+</script>
+</body>
+</html>
