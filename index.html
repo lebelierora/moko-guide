@@ -31,11 +31,13 @@
     0%, 100% { transform: scale(1) translateY(0); }
     50% { transform: scale(1.014) translateY(-3px); }
   }
-  .char-wrap canvas {
+  .char-wrap img {
     position: absolute; inset: 0; width: 100%; height: 100%;
-    border-radius: 18px;
+    object-fit: cover; border-radius: 18px;
+    opacity: 0; transition: opacity 60ms linear;
     box-shadow: 0 8px 28px rgba(120, 95, 60, .18);
   }
+  .char-wrap img.on { opacity: 1; }
   .bubble {
     flex: 0 0 auto; width: 100%; max-width: 430px;
     background: #fff; border: 2px solid #e8dcc8; border-radius: 16px;
@@ -64,7 +66,16 @@
 <body>
   <div class="stage">
     <div class="char-wrap" id="wrap">
-      <canvas id="cv" width="600" height="740"></canvas>
+      <img id="img-base" class="on" src="base.jpg" alt="">
+      <img id="img-blink" src="blink.jpg" alt="">
+      <img id="img-smile" src="smile.jpg" alt="">
+      <img id="img-mouth1" src="mouth1.jpg" alt="">
+      <img id="img-mouth2" src="mouth2.jpg" alt="">
+      <img id="img-mouth3" src="mouth3.jpg" alt="">
+      <img id="img-mouth4" src="mouth4.jpg" alt="">
+      <img id="img-mouth5" src="mouth5.jpg" alt="">
+      <img id="img-mouth6" src="mouth6.jpg" alt="">
+      <img id="img-mouth7" src="mouth7.jpg" alt="">
     </div>
   </div>
   <div class="bubble"><p id="line" class="idle">聞きたい項目を押すと、モコが説明します</p></div>
@@ -72,172 +83,47 @@
   <div class="note">開いている間だけの試作です。音が出ます。</div>
 <script>
 (function(){
-  var W = 600, H = 740;
-  var cv = document.getElementById('cv');
-  var ctx = cv.getContext('2d');
+  var imgs = {
+    base: document.getElementById('img-base'),
+    blink: document.getElementById('img-blink'),
+    smile: document.getElementById('img-smile'),
+    mouth1: document.getElementById('img-mouth1'),
+    mouth2: document.getElementById('img-mouth2'),
+    mouth3: document.getElementById('img-mouth3'),
+    mouth4: document.getElementById('img-mouth4'),
+    mouth5: document.getElementById('img-mouth5'),
+    mouth6: document.getElementById('img-mouth6'),
+    mouth7: document.getElementById('img-mouth7')
+  };
+  // 口の形：1=少し開け 2=あ(中) 3=あ(大) 4=い 5=う 6=え 7=お。0は閉じ口（base）
+  var TIERS = [ [1, 5], [2, 6, 4, 7], [3, 2, 7] ];
   var lineEl = document.getElementById('line');
   var topicsEl = document.getElementById('topics');
+  var current = 'base';
+  var speaking = false;
+  var exprNow = 'base';
+  var playingIdx = -1;
 
-  // ---- 画像素材（全部同じ顔の幾何で揃えた合成済み） ----
-  var SRC = {
-    base: 'base.jpg', smile: 'smile.jpg',
-    mouth1: 'mouth1.jpg', mouth2: 'mouth2.jpg', mouth3: 'mouth3.jpg',
-    mouth4: 'mouth4.jpg', mouth5: 'mouth5.jpg', mouth6: 'mouth6.jpg', mouth7: 'mouth7.jpg'
-  };
-  var IMG = {}, loaded = 0, total = 0, skinDone = false;
-  for (var k in SRC) { total++; IMG[k] = new Image(); IMG[k].onload = function(){ loaded++; }; IMG[k].src = SRC[k]; }
-
-  var current = 'base', prev = null, fade = 1;
-  var speaking = false, exprNow = 'base', playingIdx = -1;
   function show(name){
     if (name === current) return;
-    prev = current; current = name; fade = 0;
+    imgs[current].classList.remove('on');
+    imgs[name].classList.add('on');
+    current = name;
   }
 
-  // ---- メッシュ変形レンダラ（瞬きだけ変形で作る） ----
-  var COLS = 10, ROWS = 13;
-  function drawTri(img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2){
-    // タイルの継ぎ目消し：宛先三角形を重心から少しだけ広げて隣と重ねる
-    var cx = (dx0 + dx1 + dx2) / 3, cy = (dy0 + dy1 + dy2) / 3;
-    var ex = [dx0, dx1, dx2], ey = [dy0, dy1, dy2];
-    for (var i = 0; i < 3; i++) {
-      var vx = ex[i] - cx, vy = ey[i] - cy;
-      var len = Math.sqrt(vx * vx + vy * vy);
-      if (len > 0.01) { ex[i] += vx / len * 0.9; ey[i] += vy / len * 0.9; }
-    }
-    dx0 = ex[0]; dy0 = ey[0]; dx1 = ex[1]; dy1 = ey[1]; dx2 = ex[2]; dy2 = ey[2];
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(dx0, dy0); ctx.lineTo(dx1, dy1); ctx.lineTo(dx2, dy2);
-    ctx.closePath(); ctx.clip();
-    var denom = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0);
-    if (Math.abs(denom) < 0.001) { ctx.restore(); return; }
-    var a = ((dx1 - dx0) * (sy2 - sy0) - (dx2 - dx0) * (sy1 - sy0)) / denom;
-    var b = ((dx2 - dx0) * (sx1 - sx0) - (dx1 - dx0) * (sx2 - sx0)) / denom;
-    var c = ((dy1 - dy0) * (sy2 - sy0) - (dy2 - dy0) * (sy1 - sy0)) / denom;
-    var d = ((dy2 - dy0) * (sx1 - sx0) - (dy1 - dy0) * (sx2 - sx0)) / denom;
-    var e = dx0 - a * sx0 - b * sy0;
-    var f = dy0 - c * sx0 - d * sy0;
-    ctx.transform(a, c, b, d, e, f);
-    ctx.drawImage(img, 0, 0);
-    ctx.restore();
-  }
-  var blinkAmt = 0;
-  // 目の幾何（画像座標）：内側の目角・外側の目角・中心。元の絵の目の角度に合わせる
-  var EYES = [
-    { x1: 264, y1: 330, x2: 190, y2: 337, cx: 227, cy: 338, rx: 41, ry: 35 },
-    { x1: 307, y1: 313, x2: 389, y2: 299, cx: 348, cy: 306, rx: 43, ry: 37 }
-  ];
-  function warpPoint(x, y, t){
-    return [x, y];
-  }
-  // 肌色を元絵から採取（額と頬の平均）。取れなければ既定色
-  var skinTop = '#f4d7ba', skinBot = '#eec39d';
-  function sampleSkin(){
-    try {
-      var oc = document.createElement('canvas');
-      oc.width = W; oc.height = H;
-      var octx = oc.getContext('2d');
-      octx.drawImage(IMG.base, 0, 0);
-      function avg(x, y, w, h){
-        var d = octx.getImageData(x, y, w, h).data;
-        var r = 0, g = 0, b = 0, n = 0;
-        for (var i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
-        return 'rgb(' + Math.round(r / n) + ',' + Math.round(g / n) + ',' + Math.round(b / n) + ')';
+  // 瞬き：喋っていないときだけ、たまに瞬き画像へ
+  function blinkLoop(){
+    var wait = 2200 + Math.random() * 2800;
+    setTimeout(function(){
+      if (!speaking) {
+        show('blink');
+        setTimeout(function(){ if (!speaking) show(exprNow); }, 160);
       }
-      skinTop = avg(284, 230, 34, 22);
-      skinBot = avg(126, 424, 44, 30);
-    } catch (e) { /* 既定色のまま */ }
+      blinkLoop();
+    }, wait);
   }
-  // 瞬き：目の領域を肌で覆い、まつ毛の線を元の目の角度で引く（別画像に差し替えない）
-  function drawLids(){
-    if (blinkAmt <= 0) return;
-    for (var e = 0; e < 2; e++) {
-      var E = EYES[e];
-      // まつ毛ラインの現在位置（閉じ始めは目の上端、閉じ切りは目角の高さ）
-      var ly1 = (E.cy - E.ry * 0.8) + (E.y1 - (E.cy - E.ry * 0.8)) * blinkAmt;
-      var ly2 = (E.cy - E.ry * 0.8) + (E.y2 - (E.cy - E.ry * 0.8)) * blinkAmt;
-      var ctrlY = Math.max(ly1, ly2) + 4 + 9 * blinkAmt;
-      ctx.save();
-      ctx.beginPath();
-      ctx.ellipse(E.cx, E.cy, E.rx + 3, E.ry + 3, 0, 0, Math.PI * 2);
-      ctx.clip();
-      // 目の領域全体を肌のグラデーションで覆う（下まぶた側も肌になる）
-      var grad = ctx.createLinearGradient(0, E.cy - E.ry, 0, E.cy + E.ry);
-      grad.addColorStop(0, skinTop);
-      grad.addColorStop(1, skinBot);
-      ctx.fillStyle = grad;
-      ctx.fillRect(E.cx - E.rx - 4, E.cy - E.ry - 4, E.rx * 2 + 8, E.ry * 2 + 8);
-      ctx.restore();
-      // まつ毛の線（下に薄い影、上に薄い二重の線）
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = 'rgba(190, 140, 100, 0.35)';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(E.x1, ly1 + 5);
-      ctx.quadraticCurveTo(E.cx, ctrlY + 5, E.x2, ly2 + 5);
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(120, 85, 60, 0.16)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(E.x1, ly1 - 9);
-      ctx.quadraticCurveTo(E.cx, ctrlY - 9, E.x2, ly2 - 9);
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(74, 50, 38, 0.92)';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(E.x1, ly1);
-      ctx.quadraticCurveTo(E.cx, ctrlY, E.x2, ly2);
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-  function drawWarped(img, alpha, t){
-    ctx.globalAlpha = alpha;
-    var cw = W / COLS, ch = H / ROWS;
-    var pts = [];
-    for (var r = 0; r <= ROWS; r++) {
-      pts[r] = [];
-      for (var c = 0; c <= COLS; c++) pts[r][c] = warpPoint(c * cw, r * ch, t);
-    }
-    for (var r2 = 0; r2 < ROWS; r2++) {
-      for (var c2 = 0; c2 < COLS; c2++) {
-        var x0 = c2 * cw, y0 = r2 * ch;
-        var p00 = pts[r2][c2], p10 = pts[r2][c2 + 1], p01 = pts[r2 + 1][c2], p11 = pts[r2 + 1][c2 + 1];
-        drawTri(img, x0, y0, x0 + cw, y0, x0, y0 + ch, p00[0], p00[1], p10[0], p10[1], p01[0], p01[1]);
-        drawTri(img, x0 + cw, y0, x0 + cw, y0 + ch, x0, y0 + ch, p10[0], p10[1], p11[0], p11[1], p01[0], p01[1]);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-  var nextBlinkAt = 1800;
-  function render(now){
-    var t = now / 1000;
-    // 瞬きの進行（約0.19秒で閉じて開く）
-    if (now >= nextBlinkAt) {
-      var bp = (now - nextBlinkAt) / 190;
-      if (bp >= 1) { blinkAmt = 0; nextBlinkAt = now + 2400 + Math.random() * 2800; }
-      else blinkAmt = Math.sin(bp * Math.PI);
-    }
-    ctx.clearRect(0, 0, W, H);
-    if (loaded >= total && !skinDone) { skinDone = true; sampleSkin(); }
-    if (loaded >= total) {
-      if (prev && fade < 1) {
-        drawWarped(IMG[prev], 1, t);
-        fade = Math.min(1, fade + 0.18);
-        drawWarped(IMG[current], fade, t);
-        if (fade >= 1) prev = null;
-      } else {
-        drawWarped(IMG[current], 1, t);
-      }
-      drawLids();
-    }
-    requestAnimationFrame(render);
-  }
-  requestAnimationFrame(render);
+  blinkLoop();
 
-  // ---- 台詞とボタン ----
   var LINES = [
     { label: 'ごあいさつ',       expr: 'smile', src: 'line1.mp3', text: 'いらっしゃいませ！ るべりえへようこそ。アシスタントのモコです。初めての方にも分かりやすいように、お店のことをご説明しますね。' },
     { label: 'お店のこと',       expr: 'base',  src: 'line2.mp3', text: 'るべりえは、群馬県邑楽町にある創作ピザとスイーツのお店です。ピザの生地には、群馬県産の小麦を使っています。' },
@@ -248,7 +134,8 @@
     { label: '営業時間',         expr: 'base',  src: 'line7.mp3', text: '営業時間は11:00から20:00まで、日曜日は18:00までです。木曜日が定休日です。' },
     { label: '通販',             expr: 'smile', src: 'line8.mp3', text: '冷凍ピザは、STORESのネットショップから、全国への配送もできます。遠方の方への贈り物にもどうぞ。' }
   ];
-  var audios = [], buttons = [];
+  var audios = [];
+  var buttons = [];
   for (var i = 0; i < LINES.length; i++) {
     var a = new Audio(LINES[i].src);
     a.preload = 'auto';
@@ -262,8 +149,8 @@
     })(i);
   }
 
-  // ---- 口パク（8段階） ----
-  var actx = null, analyser = null, mouthRaf = null;
+  // 音量連動の口パク：声の大きさで口の開閉を決める
+  var actx = null, analyser = null, mouthRaf = null, mouthOpen = false;
   function initAudioGraph(){
     if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
     try {
@@ -271,11 +158,14 @@
       actx = new AC();
       analyser = actx.createAnalyser();
       analyser.fftSize = 512;
-      for (var i = 0; i < audios.length; i++) actx.createMediaElementSource(audios[i]).connect(analyser);
+      for (var i = 0; i < audios.length; i++) {
+        actx.createMediaElementSource(audios[i]).connect(analyser);
+      }
       analyser.connect(actx.destination);
-    } catch (e) { actx = null; analyser = null; }
+    } catch (e) {
+      actx = null; analyser = null;
+    }
   }
-  var TIERS = [ [1, 5], [2, 6, 4, 7], [3, 2, 7] ];
   var smoothLevel = 0, lastSwitch = 0, tierPos = [0, 0, 0], mouthStage = 0;
   function pickStage(level){
     if (level < 0.02) return 0;
@@ -317,6 +207,7 @@
   }
   function stopMouth(){
     if (mouthRaf) { cancelAnimationFrame(mouthRaf); clearInterval(mouthRaf); mouthRaf = null; }
+    mouthOpen = false;
     mouthStage = 0;
   }
 
@@ -326,6 +217,7 @@
       if (i === idx) buttons[i].classList.add('playing'); else buttons[i].classList.remove('playing');
     }
   }
+
   function stopAll(){
     speaking = false;
     for (var i = 0; i < audios.length; i++) { try { audios[i].pause(); } catch (e) {} }
@@ -334,6 +226,7 @@
     show('base');
     setPlaying(-1);
   }
+
   function tapTopic(idx){
     initAudioGraph();
     if (speaking && playingIdx === idx) { stopAll(); return; }
@@ -365,6 +258,7 @@
     if (p && p.catch) p.catch(function(){ stopMouth(); speaking = false; setPlaying(-1); });
     startMouth();
   }
+
   document.addEventListener('visibilitychange', function(){
     if (document.hidden) stopAll();
   });
