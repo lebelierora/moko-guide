@@ -68,8 +68,14 @@
     <div class="char-wrap" id="wrap">
       <img id="img-base" class="on" src="base.jpg" alt="">
       <img id="img-blink" src="blink.jpg" alt="">
-      <img id="img-talk" src="talk.jpg" alt="">
       <img id="img-smile" src="smile.jpg" alt="">
+      <img id="img-mouth1" src="mouth1.jpg" alt="">
+      <img id="img-mouth2" src="mouth2.jpg" alt="">
+      <img id="img-mouth3" src="mouth3.jpg" alt="">
+      <img id="img-mouth4" src="mouth4.jpg" alt="">
+      <img id="img-mouth5" src="mouth5.jpg" alt="">
+      <img id="img-mouth6" src="mouth6.jpg" alt="">
+      <img id="img-mouth7" src="mouth7.jpg" alt="">
     </div>
   </div>
   <div class="bubble"><p id="line" class="idle">聞きたい項目を押すと、モコが説明します</p></div>
@@ -80,9 +86,17 @@
   var imgs = {
     base: document.getElementById('img-base'),
     blink: document.getElementById('img-blink'),
-    talk: document.getElementById('img-talk'),
-    smile: document.getElementById('img-smile')
+    smile: document.getElementById('img-smile'),
+    mouth1: document.getElementById('img-mouth1'),
+    mouth2: document.getElementById('img-mouth2'),
+    mouth3: document.getElementById('img-mouth3'),
+    mouth4: document.getElementById('img-mouth4'),
+    mouth5: document.getElementById('img-mouth5'),
+    mouth6: document.getElementById('img-mouth6'),
+    mouth7: document.getElementById('img-mouth7')
   };
+  // 口の形：1=少し開け 2=あ(中) 3=あ(大) 4=い 5=う 6=え 7=お。0は閉じ口（base）
+  var TIERS = [ [1, 5], [2, 6, 4, 7], [3, 2, 7] ];
   var lineEl = document.getElementById('line');
   var topicsEl = document.getElementById('topics');
   var current = 'base';
@@ -152,7 +166,14 @@
       actx = null; analyser = null;
     }
   }
-  var smoothLevel = 0, lastSwitch = 0;
+  var smoothLevel = 0, lastSwitch = 0, tierPos = [0, 0, 0], mouthStage = 0;
+  function pickStage(level){
+    if (level < 0.02) return 0;
+    var t = level < 0.06 ? 0 : (level < 0.13 ? 1 : 2);
+    var pool = TIERS[t];
+    tierPos[t] = (tierPos[t] + 1) % pool.length;
+    return pool[tierPos[t]];
+  }
   function mouthLoop(){
     if (!speaking) return;
     if (analyser) {
@@ -163,22 +184,31 @@
       var rms = Math.sqrt(sum / buf.length);
       smoothLevel = smoothLevel * 0.55 + rms * 0.45;
       var now = performance.now();
-      if (now - lastSwitch >= 110) {
-        if (!mouthOpen && smoothLevel > 0.045) { mouthOpen = true; lastSwitch = now; show('talk'); }
-        else if (mouthOpen && smoothLevel < 0.02) { mouthOpen = false; lastSwitch = now; show(exprNow); }
+      if (now - lastSwitch >= 120) {
+        var st = pickStage(smoothLevel);
+        if (st !== mouthStage) {
+          mouthStage = st;
+          lastSwitch = now;
+          show(st === 0 ? 'base' : 'mouth' + st);
+        }
       }
     }
     mouthRaf = requestAnimationFrame(mouthLoop);
   }
+  var fallbackSeq = [1, 2, 5, 6, 3, 7, 4, 2], fallbackPos = 0;
   function startMouth(){
     if (analyser) { mouthLoop(); }
     else {
-      mouthRaf = setInterval(function(){ show(current === 'talk' ? exprNow : 'talk'); }, 170);
+      mouthRaf = setInterval(function(){
+        fallbackPos = (fallbackPos + 1) % fallbackSeq.length;
+        show('mouth' + fallbackSeq[fallbackPos]);
+      }, 150);
     }
   }
   function stopMouth(){
     if (mouthRaf) { cancelAnimationFrame(mouthRaf); clearInterval(mouthRaf); mouthRaf = null; }
     mouthOpen = false;
+    mouthStage = 0;
   }
 
   function setPlaying(idx){
